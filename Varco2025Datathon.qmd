@@ -1,0 +1,176 @@
+---
+title: "Analyzing the New York State of Health"
+author: "Vincent Liu, Marco Mendoza"
+format:
+  html:
+    toc: true
+    embed-resources: true
+date: today
+theme: flatly
+---
+
+```{r}
+#| label: setup
+#| include: false
+
+# Loading library
+library(tidyverse)
+library(vroom)
+library(ggplot2)
+library(ggiraph)
+library(sf)
+library(tigris)
+library(dplyr)
+library(shiny)
+library(plotly)
+library(scales)
+```
+
+# Introductions
+
+The visualizations on this page are built using real-world data from the New York Statewide Planning and Research Cooperative System (SPARCS). Managed by the New York State Department of Health, SPARCS collects detailed information about hospital discharges, patient characteristics, diagnoses, treatments, and charges from hospitals and clinics across New York State.
+
+As we worked through this large dataset (**covering over 1.19 million records**) we discovered some really interesting patterns across different hospitals and procedures. Along the way, we explored how hospitals total discharges change over time, how costs relate to discharges, and what broader trends start to emerge when you take a step back and look at the data as a whole.
+
+This project is all about sharing those insights and helping make sense of the numbers behind healthcare in New York.
+
+Note: We used both R and Tableau to create the following visualizations. Allowing us to mix both interactive and static visualizations.
+
+---
+
+# Data Cleaning
+
+```{r}
+#| echo: true
+#| eval: true
+
+#Loading Data frame
+hospital_df <- vroom("Hospital_Inpatient_Discharges__SPARCS_De-Identified___Cost_Transparency__Beginning_2009_20250426.csv",
+                     col_types = cols(Discharges = col_character())) 
+
+#Cleaning Data frame
+hospital_df$Discharges <- as.numeric(gsub(",", "", hospital_df$Discharges)) # change discharge column to read commas as numbers
+hospital_df <- janitor::clean_names(hospital_df) # clean names to lowercase with _ as spaces
+hospital_df <- na.omit(hospital_df) # remove any rows with null values
+```
+
+---
+
+# Visualizations
+
+## Visualization 1: Total Discharges Each Year by Facility
+```{r}
+#| echo: false
+#| eval: true
+#| alt-text: "An interactive line graph that shows total discharges each year by each facility. Where individual facilities can be isolated."
+
+# Data
+hospital_df2 <- hospital_df |>
+  group_by(facility_name, year) |>
+  summarise(Total_Discharges = sum(discharges), .groups = 'drop') |>
+  select(
+    Facility = facility_name,
+    Year = year,
+    Total_Discharges
+  )
+
+# Plot
+p3 <- ggplot(hospital_df2, aes(x = Year, y = Total_Discharges, group = Facility, color = Facility)) +
+  geom_line() +
+  geom_point() +
+  labs(
+    title = NULL,
+    x = "Year",
+    y = "Total Discharges"
+  ) +
+  theme_minimal()
+
+interactive_plot3 <- ggplotly(p3, tooltip = c("color", "x", "y"), width = 800, height = 700)
+
+interactive_plot3 <- interactive_plot3 %>%
+  layout(
+    autosize = TRUE,
+    legend = list(
+      orientation = 'h',
+      x = 0,
+      y = -0.4 ,
+      font = list(size = 10),
+      traceorder = 'normal'
+    ),
+    margin = list(t = 50, b = 200, l = 50, r = 50)
+  )
+
+interactive_plot3
+```
+
+### Analysis
+
+This line plot shows total discharges by facility from 2010 to 2021. Although the lines initially seem overwhelming, the interactive features make it easy to isolate individual hospitals. Facilities near the top maintain consistently high discharge volumes, reflecting their roles as major healthcare providers. Most hospitals show stable trends over time, though some display notable fluctuations, hinting at operational changes or shifting patient demand.
+
+## Visualization 2: Top 15 Highest Charge-Gap Facilities
+```{r}
+#| echo: false
+#| eval: true
+#| alt-text: "An interactive bar plot that shows the top 15 facilities who over charge on practices, where Westchester Medical Center is the highest."
+
+# Data
+hospital_df3 <- hospital_df %>%
+  group_by(facility_name, year) %>%
+  mutate(
+    charge_gap = mean_charge - mean_cost
+  ) %>%
+  ungroup() %>% 
+  group_by(facility_name) %>%
+  summarise(
+    Total_Charge_Gap = sum(charge_gap, na.rm = TRUE)
+  ) %>%
+  arrange(desc(Total_Charge_Gap)) %>%
+  slice_head(n = 15)
+
+# Plot
+p <- ggplot(hospital_df3, aes(x = reorder(facility_name, Total_Charge_Gap), y = Total_Charge_Gap)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(
+    title = NULL,
+    x = NULL,
+    y = NULL
+  ) +
+  theme_linedraw() + 
+  scale_y_continuous(labels = scales::comma)
+
+# Then, make it interactive with plotly
+interactive_plot <- ggplotly(p, tooltip = c("x", "y"))
+
+interactive_plot
+
+```
+
+### Analysis
+
+This bar chart ranks hospitals by their Charge-Cost Gap (Mean Charge - Mean Cost), which calculates a profit-like margin per discharge. Facilities at the top of the chart show the greatest financial margin between cost and billing. This analysis highlights disparities in hospital pricing behavior. It flags hospitals where patients may be billed substantially more than the cost to provide services, raising important considerations about pricing transparency and hospital profitability. As we can see Westchester Medical Center throughout the years have overcharged 1.5 billion to patients.
+
+## Visualization 3: Average Charges and Patient Volume
+![](Sheet 1.png)
+
+### Analysis
+
+This graph presents a line chart tracking Average Mean Charge and Discharges over time from 2008 to 2022, filtered for a specific hospital. It allows us to assess whether patient volumes and hospital charges have increased, decreased, or shifted independently.
+By analyzing the trends, we observe that while patient discharges may decline in certain years (such as during the COVID-19 pandemic), the average charges per patient can still increase, indicating that rising healthcare costs are not solely driven by patient volume.
+
+## Visualization 4: Average Costs and Charges based on Severity Level
+![](Sheet 4.png)
+
+### Analysis
+
+This bar chart compares the Average Mean Cost and Average Mean Charge across different severity levels — Minor, Moderate, Major, and Extreme.
+
+The visualization clearly demonstrates that both the cost of care and the prices charged to patients increase progressively as severity worsens. However, it also shows that the rate of increase in charges often outpaces the increase in actual cost, suggesting growing hospital margins for higher-severity patients. This supports deeper discussions around healthcare billing and fairness.
+
+---
+
+# Conclusions
+
+Through these four visualizations, we addressed key data exploration questions posed by the New York State Department of Health. We revealed important trends in healthcare charges and costs over time, identified facilities with significant financial gaps, and demonstrated that care costs scale with patient severity.
+
+These insights help paint a clearer picture of hospital operations across New York State and offer valuable starting points for policy discussions, healthcare cost reforms, and future predictive modeling efforts.
